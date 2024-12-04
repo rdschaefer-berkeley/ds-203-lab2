@@ -1,0 +1,52 @@
+---
+title: "Lab 2 Part 2"
+author: "Ryan Schaefer"
+format: pdf
+---
+
+```{r}
+#| message: false
+
+library(haven)
+library(lmtest)
+library(sandwich)
+library(tidyverse)
+```
+
+# Load Data
+
+```{r}
+df_demo = read_xpt("../data/external/DEMO_L.XPT")
+
+dim(df_demo)
+head(df_demo)
+```
+
+```{r}
+df_bm = read_xpt("../data/external/BMX_L.XPT")
+
+dim(df_bm)
+head(df_bm)
+```
+
+
+```{r}
+df = df_demo %>%
+  inner_join(df_bm, by = "SEQN") 
+
+dim(df)
+head(df)
+```
+
+# Data Wrangling
+
+```{r}
+
+```
+
+# Operationalization
+
+```{r}
+
+```
+
