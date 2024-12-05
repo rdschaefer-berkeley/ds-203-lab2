@@ -8,6 +8,7 @@ format: pdf
 #| message: false
 
 library(haven)
+library(here)
 library(lmtest)
 library(sandwich)
 library(tidyverse)
@@ -16,21 +17,23 @@ library(tidyverse)
 # Load Data
 
 ```{r}
-df_demo = read_xpt("../data/external/DEMO_L.XPT")
+df_demo = read_xpt(here("data", "external", "DEMO_L.XPT"))
 
 dim(df_demo)
 head(df_demo)
 ```
 
 ```{r}
-df_bm = read_xpt("../data/external/BMX_L.XPT")
+df_bm = read_xpt(here("data", "external", "BMX_L.XPT"))
 
 dim(df_bm)
 head(df_bm)
 ```
 
+# Data Wrangling
 
 ```{r}
+# Join datasets on unique ID
 df = df_demo %>%
   inner_join(df_bm, by = "SEQN") 
 
@@ -38,15 +41,61 @@ dim(df)
 head(df)
 ```
 
-# Data Wrangling
+## Select wanted columns 
 
 ```{r}
+df_clean = df %>%
+  # Select wanted columns
+  select(BMXBMI, INDFMPIR, RIDAGEYR, RIAGENDR, RIDRETH3) %>%
+  # Make names more readable
+  rename(
+    bmi = BMXBMI,
+    income = INDFMPIR,
+    age = RIDAGEYR,
+    gender = RIAGENDR,
+    ethnicity = RIDRETH3
+  ) %>%
+  # Add labels to categorical levels
+  mutate(
+    gender = case_when(
+      gender == 1 ~ "Male",
+      gender == 2 ~ "Female"
+    ),
+    ethnicity = case_when(
+      ethnicity == 1 ~ "Mexican",
+      ethnicity == 2 ~ "Other Hispanic",
+      ethnicity == 3 ~ "White",
+      ethnicity == 4 ~ "Black",
+      ethnicity == 6 ~ "Asian",
+      ethnicity == 7 ~ "Other Race"
+    )
+  )
 
+dim(df_clean)
+head(df_clean)
 ```
 
 # Operationalization
 
 ```{r}
+# Count NA's in each column
+df_clean %>%
+  summarize(across(everything(), ~ .x %>% is.na() %>% sum()))
+```
 
+```{r}
+# Count rows with any NA's
+df_clean %>%
+  filter(if_any(everything(), ~ is.na(.x))) %>%
+  count()
+```
+
+```{r}
+# Remove rows with any NA's
+df_final = df_clean %>%
+  drop_na()
+
+dim(df_final)
+head(df_final)
 ```
 
