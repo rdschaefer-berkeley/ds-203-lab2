@@ -99,3 +99,9 @@ dim(df_final)
 head(df_final)
 ```
 
+# Export Results
+
+```{r}
+write_csv(df_final, here("data", "interim", "part2.csv"))
+```
+
