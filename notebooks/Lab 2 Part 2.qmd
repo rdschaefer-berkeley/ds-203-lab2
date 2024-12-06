@@ -46,9 +46,12 @@ head(df)
 ```{r}
 df_clean = df %>%
   # Select wanted columns
-  select(BMXBMI, INDFMPIR, RIDAGEYR, RIAGENDR, RIDRETH3) %>%
+  select(SDMVSTRA, SDMVPSU, WTMEC2YR, BMXBMI, INDFMPIR, RIDAGEYR, RIAGENDR, RIDRETH3) %>%
   # Make names more readable
   rename(
+    stratum = SDMVSTRA,
+    psu = SDMVPSU,
+    weight = WTMEC2YR,
     bmi = BMXBMI,
     income = INDFMPIR,
     age = RIDAGEYR,
