@@ -1,0 +1,630 @@
+---
+title: "Lab 2 part 4"
+author: "Carlos Schrupp"
+format: pdf
+---
+
+Loading libraries
+
+```{r}
+#| echo: false
+library(haven)
+library(here)
+library(lmtest)
+library(sandwich)
+library(tidyverse)
+library(survey)
+library(car)
+library(ggplot2)
+library(stargazer)
+```
+
+Loading part2 data
+
+```{r}
+#| echo: false
+part2 = read.csv("C://Users//Carlos//Downloads//part2.csv")
+head(part2)
+```
+
+Ploting data:
+
+```{r}
+ggplot(part2, aes(x = income, y = bmi)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "BMI vs. Income",
+       x = "Income",
+       y = "BMI") +
+  theme_minimal()
+```
+
+Adding age groups:
+
+```{r}
+#| echo: true
+part2$age_group <- cut(part2$age, 
+                       breaks = c(0, 10, 20, 30, 40, 50, 60, 70, Inf), 
+                       labels = c("0-10","10-19","20-29", "30-39", "40-49", "50-59", "60-69", "70+"), 
+                       right = FALSE)
+table(part2$age_group)
+```
+
+```{r}
+part2$age_group_2<- cut(part2$age, 
+                       breaks = c(0, 20, Inf), 
+                       labels = c("0-20", "20+"), 
+                       right = FALSE)
+table(part2$age_group_2)
+```
+
+Adding income categories:
+
+```{r}
+part2$income_category <- cut(part2$income,
+                             breaks = c(-Inf, 1.3, 3.0, Inf),
+                             labels = c("Low", "Middle", "High"),
+                             right = FALSE)
+table(part2$income_category)
+```
+
+```{r}
+part2$income_category <- cut(part2$income,
+                             breaks = c(-Inf, 1.3, Inf),
+                             labels = c("Low", "High"),
+                             right = FALSE)
+table(part2$income_category)
+
+```
+
+Do not use Filter income = 5 and income = 0:
+
+```{r}
+#part2 <- part2 %>%
+#  filter(income < 5)
+
+#part2 <- part2 %>%
+#  filter(income > 0 )
+```
+
+Adding obesity flag:
+
+```{r}
+# Assuming your dataset 'part2' has a numeric 'bmi' variable:
+part2$bmi_category <- cut(part2$bmi, 
+                          breaks = c(0, 18.5, 24.9, 29.9, Inf),
+                          labels = c("Underweight", "Normal weight", "Overweight", "Obesity"))
+summary(part2$bmi_category)
+
+# Create an obesity flag
+part2$obese_flag <- ifelse(part2$bmi >= 30, 1, 0)
+```
+
+Filtering age \<20
+
+```{r}
+part2 <- part2 %>% 
+  filter(age >= 20)
+```
+
+Set ethnicity reference to "White"
+
+```{r}
+part2$ethnicity <- factor(part2$ethnicity, 
+                          levels = c("Asian", "White", "Black", "Mexican", "Other Hispanic", "Other Race"))
+part2$ethnicity <- relevel(part2$ethnicity, ref = "White")
+levels(part2$ethnicity)
+```
+
+Do not use Filter Asian ethnicity:
+
+```{r}
+# part2 <- subset(part2, ethnicity != "Asian")
+```
+
+Load NHANES survey stratification and weights:
+
+```{r}
+#| echo: true
+
+nhanes_survey = nhanes_design <- svydesign(
+  id = ~psu,
+  strata = ~stratum,
+  weights = ~weight,
+  data = part2,
+  nest = TRUE
+)
+```
+
+Calculating means to know where we stand:
+
+Note: Age has a complex relationship with BMI, its recommended to start using BMI with ages 20 and up
+
+```{r}
+#| echo: true
+svymean(~bmi, design = nhanes_design)    # Weighted mean of BMI
+
+
+svyby(~bmi, ~cut(income, breaks=c(0,1,2,3,4,5)), nhanes_design, svymean) # Means by income groups
+
+
+svyby(~bmi, ~cut(part2$age, breaks=c(0,2,6,12,20,Inf)), nhanes_design, svymean) # Means by age groups
+
+# svyby(~income, ~cut(part2$ethnicity, breaks=c("Asian")), nhanes_design, svymean)
+
+```
+
+Model 1
+
+Regressing income alone on BMI
+
+Result is significant after filtering BMI for age \<20
+
+```{r}
+# Survey model
+model_1 <- svyglm(bmi ~ income  , design = nhanes_survey)
+summary(model_1)
+
+# Standard model
+model_1_st <- lm(bmi~ income, data = part2)
+summary(model_1_st)
+
+```
+
+Plot model 1 Residuals:
+
+```{r}
+# Extract fitted values and residuals from the model
+fitted_vals <- fitted(model_1)
+residual_vals <- residuals(model_1)
+
+# Put them into a data frame for plotting
+resid_data <- data.frame(
+  fitted = fitted_vals,
+  residuals = residual_vals
+)
+
+
+ggplot(resid_data, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5) +         # Scatter plot of residuals
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") + 
+  labs(title = "Residuals vs. Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme_minimal()
+
+qqnorm(residual_vals)
+qqline(residual_vals, col = "red")
+
+# Histogram of Residuals
+ggplot(resid_data, aes(x = residuals)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white", alpha = 0.7) +
+  labs(title = "Histogram of Residuals",
+       x = "Residuals",
+       y = "Count") +
+  theme_minimal()
+```
+
+Model 1a:
+
+Regressing income categories alone on BMI
+
+Result barely significant with income categories alone
+
+```{r}
+# Survey model
+model_1a <- svyglm(bmi ~ income_category  , design = nhanes_survey)
+summary(model_1a)
+
+# Standard model
+model_1a_st <- lm(bmi~ income_category , data = part2)
+summary(model_1a_st)
+```
+
+Plot model 1a Residuals:
+
+```{r}
+# Extract fitted values and residuals from the model
+fitted_vals <- fitted(model_1a)
+residual_vals <- residuals(model_1a)
+
+# Put them into a data frame for plotting
+resid_data <- data.frame(
+  fitted = fitted_vals,
+  residuals = residual_vals
+)
+
+
+ggplot(resid_data, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5) +         # Scatter plot of residuals
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") + 
+  labs(title = "Residuals vs. Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme_minimal()
+
+qqnorm(residual_vals)
+qqline(residual_vals, col = "red")
+
+# Histogram of Residuals
+ggplot(resid_data, aes(x = residuals)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white", alpha = 0.7) +
+  labs(title = "Histogram of Residuals",
+       x = "Residuals",
+       y = "Count") +
+  theme_minimal()
+```
+
+Model 2:
+
+Including gender
+
+```{r}
+
+# Survey model
+model_2 <- svyglm(bmi~ income * gender , design = nhanes_survey)
+summary(model_2)
+
+# Standard model
+model_2_st <- lm(bmi~ income * gender , data = part2)
+summary(model_2_st)
+vif(model_2)
+```
+
+Plot model 2 Residuals:
+
+```{r}
+# Extract fitted values and residuals from the model
+fitted_vals <- fitted(model_2)
+residual_vals <- residuals(model_2)
+
+# Put them into a data frame for plotting
+resid_data <- data.frame(
+  fitted = fitted_vals,
+  residuals = residual_vals
+)
+
+
+ggplot(resid_data, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5) +         # Scatter plot of residuals
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") + 
+  labs(title = "Residuals vs. Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme_minimal()
+
+qqnorm(residual_vals)
+qqline(residual_vals, col = "red")
+
+# Histogram of Residuals
+ggplot(resid_data, aes(x = residuals)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white", alpha = 0.7) +
+  labs(title = "Histogram of Residuals",
+       x = "Residuals",
+       y = "Count") +
+  theme_minimal()
+```
+
+Model 3:
+
+Including age
+
+```{r}
+model_3 <- svyglm(bmi ~ income * age, design = nhanes_survey)
+summary(model_3)
+vif(model_3)
+```
+
+Plot model 3 Residuals:
+
+```{r}
+# Extract fitted values and residuals from the model
+fitted_vals <- fitted(model_2)
+residual_vals <- residuals(model_2)
+
+# Put them into a data frame for plotting
+resid_data <- data.frame(
+  fitted = fitted_vals,
+  residuals = residual_vals
+)
+
+
+ggplot(resid_data, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5) +         # Scatter plot of residuals
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") + 
+  labs(title = "Residuals vs. Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme_minimal()
+
+qqnorm(residual_vals)
+qqline(residual_vals, col = "red")
+
+# Histogram of Residuals
+ggplot(resid_data, aes(x = residuals)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white", alpha = 0.7) +
+  labs(title = "Histogram of Residuals",
+       x = "Residuals",
+       y = "Count") +
+  theme_minimal()
+```
+
+Model 4:
+
+Including ethnicity:
+
+```{r}
+
+# Survey model
+model_4 <- svyglm(bmi~ income * ethnicity , design = nhanes_survey)
+summary(model_4)
+
+vif(model_4)
+```
+
+```{r}
+# Extract fitted values and residuals from the model
+fitted_vals <- fitted(model_4)
+residual_vals <- residuals(model_4)
+
+# Put them into a data frame for plotting
+resid_data <- data.frame(
+  fitted = fitted_vals,
+  residuals = residual_vals
+)
+
+library(ggplot2)
+
+ggplot(resid_data, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5) +         # Scatter plot of residuals
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") + 
+  labs(title = "Residuals vs. Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme_minimal()
+```
+
+```{r}
+
+```
+
+```{r}
+# Summarize data to find proportion of obesity within each income category
+income_obesity_summary <- part2 %>%
+  group_by(income_category) %>%
+  summarize(obesity_rate = mean(obese_flag, na.rm = TRUE))
+
+# Plot the obesity rate by income category
+ggplot(income_obesity_summary, aes(x = income_category, y = obesity_rate)) +
+  geom_col(fill = "steelblue") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Obesity Prevalence by Income Category",
+    x = "Income Category",
+    y = "Obesity Rate (%)"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+Model 5
+
+Regressing income, age and a factored etnicity on BMI
+
+Result: Using gender, ethnicity and income results , out of degrees of freedom, to investigate in the future no P-values
+
+```{r}
+
+model_5 <- svyglm(bmi ~ income * gender * ethnicity, design = nhanes_survey)
+summary(model_5)
+vif(model_5)
+
+```
+
+```{r}
+```
+
+```{r}
+stargazer(model_1, model_1a, model_2, model_3, model_4,
+          type = "text",   # Options: "text", "html", or "latex"
+          title = "Comparison of Models",
+          dep.var.labels = c("BMI"),
+          column.labels = c("Model 1", "Model 1a", "Model 2", "Model 3", "Model 4"),
+          covariate.labels = c("Income", "Income Category: High", "Gender: Male", "Age", 
+                               "Ethnicity: Asian", "Income x Gender", "Income x Age", 
+                               "Income x Ethnicity"),
+          omit.stat = c("f", "ser"),  # Removes F-statistic and standard error stats
+          digits = 2)
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+This table summarizes the results of five regression models exploring the relationship between income and Body Mass Index (BMI) using NHANES survey data. It incorporates different covariates and interactions to capture the nuanced effects of demographic factors. Below is a detailed explanation of each column and the results presented.
+
+### **Model Columns and Structure**
+
+1.  **Dependent Variable:** BMI\
+    All models examine the predictors of BMI, a continuous measure of body weight relative to height.
+
+2.  **Independent Variables:**
+
+    -   **Income:** Continuous variable measuring income-to-poverty ratio (INDFMPIR).
+
+    -   **Income Category:** Categorical variable grouping income into predefined levels (Low, High).
+
+    -   **Gender:** Categorical variable coded as Male/Female.
+
+    -   **Age:** Continuous variable in years.
+
+    -   **Ethnicity:** Categorical variable including racial/ethnic groups (e.g., White, Black, Asian, etc.).
+
+    -   **Interaction Terms:** Represent how the relationship between income and BMI changes depending on other demographic factors (e.g., gender, ethnicity).
+
+3.  **Model Progression:**
+
+    -   **Model 1:** Baseline model with income as a continuous predictor.
+
+    -   **Model 1a:** Uses income categories instead of continuous income.
+
+    -   **Model 2:** Adds gender and its interaction with income.
+
+    -   **Model 3:** Includes age as a predictor and its interaction with income.
+
+    -   **Model 4:** Adds ethnicity and its interaction with income.
+
+4.  **Key Statistics in Table:**
+
+    -   **Coefficients (Estimate):** Represent the relationship between the predictor and BMI.
+
+    -   **Standard Errors (in parentheses):** Measure the precision of the coefficient estimates.
+
+    -   **Significance Levels (stars):** Indicate the statistical significance of the relationship (\*p \< 0.1, \*\*p \< 0.05, \*\*\*p \< 0.01).
+
+### **Model-Specific Interpretations**
+
+#### **Model 1: Income Alone**
+
+-   **Income (-0.33, p \< 0.01):**
+
+    -   A significant negative association between income and BMI. For every unit increase in income, BMI decreases by approximately 0.33 units.
+
+    -   Suggests that individuals with higher income tend to have lower BMI, on average.
+
+#### **Model 1a: Income Categories**
+
+-   **Income Category: High (-0.81, p \< 0.05):**
+
+    -   Individuals in the "High" income category have a BMI approximately 0.81 units lower than those in the reference income category ("Low").
+
+    -   The relationship remains significant but provides a categorical perspective on the income-BMI association.
+
+#### **Model 2: Adding Gender**
+
+-   **Income (-0.64, p \< 0.01):**
+
+    -   Similar to Model 1, income remains negatively associated with BMI.
+
+-   **Gender: Male (-2.60, p \< 0.01):**
+
+    -   Males have a significantly lower baseline BMI (by 2.60 units) compared to females.
+
+-   **Income × Gender (0.67, p \< 0.01):**
+
+    -   Interaction term indicates that the negative income-BMI relationship is less pronounced for males. For males, the slope of the income-BMI relationship is approximately (-0.64 + 0.67 = +0.03), suggesting a negligible or slightly positive association.
+
+#### **Model 3: Adding Age**
+
+-   **Income (-0.47, not significant):**
+
+    -   The negative income-BMI relationship weakens and becomes statistically insignificant when age is added.
+
+-   **Age (0.67, p \< 0.01):**
+
+    -   Positive association: BMI increases slightly with age, likely reflecting physiological changes or age-related trends in weight.
+
+-   **Income × Age (not significant):**
+
+    -   No evidence that the relationship between income and BMI varies systematically with age.
+
+#### **Model 4: Adding Ethnicity**
+
+-   **Income (-0.30, not significant):**
+
+    -   The income-BMI relationship remains weak and non-significant in this model.
+
+-   **Ethnicity: Asian (-4.63, p \< 0.01):**
+
+    -   Asian participants have significantly lower BMI (by \~4.63 units) compared to the reference group at the baseline income level.
+
+-   **Other Ethnicity Effects (not significant):**
+
+    -   Differences for other ethnic groups are not statistically significant.
+
+-   **Interaction Terms (not significant):**
+
+    -   The slopes of income-BMI relationships do not differ meaningfully by ethnicity.
+
+### **Key Statistics**
+
+1.  **Constant (Intercept):**
+
+    -   Represents the predicted BMI for the reference group at baseline levels of the predictors.
+
+    -   For example, in Model 1, the baseline BMI is approximately 30.75 for individuals with zero income.
+
+2.  **Observations:**
+
+    -   All models include 5,194 observations after filtering out individuals under 20 years old.
+
+3.  **Log Likelihood and Akaike Information Criterion (AIC):**
+
+    -   Log likelihood measures model fit; higher (less negative) values indicate better fit.
+
+    -   AIC compares model performance, with lower values indicating a better trade-off between model complexity and fit.
+
+### **Overall Summary**
+
+1.  **Key Findings:**
+
+    -   **Income:** A modest but statistically significant negative relationship with BMI emerges when modeled alone or as categories.
+
+    -   **Gender:** Gender modifies the income-BMI relationship, with males showing a weaker association.
+
+    -   **Age:** BMI increases with age, but the income-BMI relationship does not vary by age.
+
+    -   **Ethnicity:** Significant baseline BMI differences exist (e.g., lower BMI for Asians), but the income-BMI slope does not differ substantially across ethnic groups.
+
+2.  **Model Fit:**
+
+    -   The inclusion of gender (Model 2) improves model fit (lower AIC), while adding age and ethnicity provides additional context but does not drastically improve explanatory power.
+
+3.  **Future Directions:**
+
+    -   Addressing top-coded income values using imputation or external data could refine estimates.
+
+    -   Exploring alternative measures of adiposity (e.g., waist circumference) might yield different insights.
+
+    -   Testing non-linear models or hierarchical approaches could better capture demographic complexities.
+
+By systematically building on the base model, the analysis demonstrates the nuanced interplay between socioeconomic and demographic factors in shaping BMI. While individual effects such as gender and ethnicity highlight important disparities, the income-BMI relationship remains modest and complex.
+
+Questions:
+
+What exactly are the weighting and sampling of nhanes doing with the data?. Differences with standard lm()
+
+What kind of model are we really applying, I would like to know more details on "svyglm"
+
+NHANES top-codes the income-to-poverty ratio at 5.0, all individuals with higher income ratios appear as a single, censored group.
+
+References:
+
+*U.S. Department of Health and Human Services, Centers for Disease Control and Prevention (CDC), National Center for Health Statistics. (2021). NHANES Analytic and Reporting Guidelines.* Retrieved from: <https://wwwn.cdc.gov/nchs/nhanes/analyticguidelines.aspx>
+
+-   Barlow, S. E., & Expert Committee. (2007). Expert committee recommendations regarding the prevention, assessment, and treatment of child and adolescent overweight and obesity: summary report. *Pediatrics, 120(Suppl 4)*, S164–S192.
+
+-   CDC. (2021). *National Health and Nutrition Examination Survey Analytic Guidelines.* Retrieved from <https://www.cdc.gov/nchs/nhanes/index.htm>
+
+-   Drewnowski, A. (2009). Obesity, diets, and social inequalities. *Nutrition Reviews, 67(suppl_1)*, S36–S39.
+
+-   Flegal, K. M., Kruszon-Moran, D., Carroll, M. D., Fryar, C. D., & Ogden, C. L. (2016). Trends in obesity among adults in the United States, 2005 to 2014. *JAMA, 315*(21), 2284–2291.
+
+-   Lumley, T. (2004). Analysis of complex survey samples. *Journal of Statistical Software, 9*(1), 1–19.
+
+-   Ogden, C. L., Fakhouri, T. H., Carroll, M. D., Hales, C. M., Fryar, C. D., & Li, X. (2017). Prevalence of obesity among adults, by household income and education—United States, 2011–2014. *MMWR Morbidity and Mortality Weekly Report, 66*(50), 1369–1373.
+
+-   Wang, J., Thornton, J. C., Russell, M., Burastero, S., Heymsfield, S., & Pierson Jr, R. N. (2007). Asians have lower body mass index (BMI) but higher percent body fat than do whites: comparisons of anthropometric measurements. *The American Journal of Clinical Nutrition, 60*(1), 23–28.
+
+-   WHO. (2000). *Obesity: Preventing and Managing the Global Epidemic.* WHO Technical Report Series 894.
