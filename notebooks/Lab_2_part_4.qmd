@@ -1,0 +1,241 @@
+---
+title: "Lab 2 part 4"
+author: "Carlos Schrupp"
+format: pdf
+---
+
+Loading libraries
+
+```{r}
+#| echo: false
+library(haven)
+library(here)
+library(lmtest)
+library(sandwich)
+library(tidyverse)
+library (survey)
+```
+
+Loading part2 data
+
+```{r}
+#| echo: false
+part2 = read.csv("C://Users//Carlos//Downloads//part2.csv")
+head(part2)
+```
+
+Adding age groups:
+
+```{r}
+#| echo: true
+part2$age_group <- cut(part2$age, 
+                       breaks = c(0, 10, 20, 30, 40, 50, 60, 70, Inf), 
+                       labels = c("0-10","10-19","20-29", "30-39", "40-49", "50-59", "60-69", "70+"), 
+                       right = FALSE)
+```
+
+Adding income categories:
+
+```{r}
+part2$income_category <- cut(part2$income,
+                             breaks = c(-Inf, 1.3, 3.0, Inf),
+                             labels = c("Low", "Middle", "High"),
+                             right = FALSE)
+```
+
+Adding obesity flag:
+
+```{r}
+# Assuming your dataset 'part2' has a numeric 'bmi' variable:
+part2$bmi_category <- cut(part2$bmi, 
+                          breaks = c(0, 18.5, 24.9, 29.9, Inf),
+                          labels = c("Underweight", "Normal weight", "Overweight", "Obesity"))
+
+summary(part2$bmi_category)
+
+# Create an obesity flag
+part2$obese_flag <- ifelse(part2$bmi >= 30, 1, 0)
+```
+
+Filtering age \<20
+
+```{r}
+part2 <- part2 %>% 
+  filter(age >= 20)
+```
+
+Set ethnicity reference to "White"
+
+```{r}
+part2$ethnicity <- factor(part2$ethnicity, 
+                          levels = c("Asian", "White", "Black", "Mexican", "Other Hispanic", "Other Race"))
+part2$ethnicity <- relevel(part2$ethnicity, ref = "White")
+levels(part2$ethnicity)
+```
+
+Filter Asian ethnicity:
+
+```{r}
+part2 <- subset(part2, ethnicity != "Asian")
+```
+
+Load NHANES survey stratification and weights:
+
+```{r}
+#| echo: true
+
+nhanes_survey = nhanes_design <- svydesign(
+  id = ~psu,
+  strata = ~stratum,
+  weights = ~weight,
+  data = part2,
+  nest = TRUE
+)
+```
+
+Calculating means to know where we stand:
+
+Note: Age has a complex relationship with BMI, its recommended to start using BMI with ages 20 and up
+
+```{r}
+#| echo: true
+svymean(~bmi, design = nhanes_design)    # Weighted mean of BMI
+
+
+svyby(~bmi, ~cut(income, breaks=c(0,1,2,3,4,5)), nhanes_design, svymean) # Means by income groups
+
+
+svyby(~bmi, ~cut(part2$age, breaks=c(0,2,6,12,20,Inf)), nhanes_design, svymean) # Means by age groups
+
+# svyby(~income, ~cut(part2$ethnicity, breaks=c("Asian")), nhanes_design, svymean)
+
+```
+
+Model 1
+
+Regressing income alone on BMI
+
+Result it's not significant with income alone
+
+```{r}
+
+model_1 <- svyglm(bmi ~ income  , design = nhanes_survey)
+summary(model_1)
+```
+
+```{r}
+
+
+
+model_1a <- svyglm(bmi~ income + ethnicity , design = nhanes_survey)
+
+summary(model_1a)
+```
+
+```{r}
+# Extract fitted values and residuals from the model
+fitted_vals <- fitted(model_1a)
+residual_vals <- residuals(model_1a)
+
+# Put them into a data frame for plotting
+resid_data <- data.frame(
+  fitted = fitted_vals,
+  residuals = residual_vals
+)
+
+library(ggplot2)
+
+ggplot(resid_data, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5) +         # Scatter plot of residuals
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") + 
+  labs(title = "Residuals vs. Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(part2, aes(x = income, y = bmi)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "BMI vs. Income",
+       x = "Income",
+       y = "BMI") +
+  theme_minimal()
+```
+
+```{r}
+# Summarize data to find proportion of obesity within each income category
+income_obesity_summary <- part2 %>%
+  group_by(income_category) %>%
+  summarize(obesity_rate = mean(obese_flag, na.rm = TRUE))
+
+# Plot the obesity rate by income category
+ggplot(income_obesity_summary, aes(x = income_category, y = obesity_rate)) +
+  geom_col(fill = "steelblue") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Obesity Prevalence by Income Category",
+    x = "Income Category",
+    y = "Obesity Rate (%)"
+  ) +
+  theme_minimal()
+
+```
+
+Model 2
+
+Regressing income and age on BMI
+
+Result: Using age and income results on significance for both
+
+```{r}
+model_2 <- svyglm(bmi ~ income + age, design = nhanes_survey)
+summary(model_2)
+```
+
+Model 3
+
+Regressing income, age and a factored etnicity on BMI
+
+Result: Using age, ethnicity and income results on significance for all, but seems to reduce it on income
+
+```{r}
+
+model_3 <- svyglm(bmi ~ income + age + factor(ethnicity), design = nhanes_survey)
+summary(model_3)
+
+```
+
+Model 4
+
+Regressing income, factored age and factored ethnicity on BMI
+
+Result: Income is not significant any more
+
+```{r}
+model_4 <- svyglm(bmi ~ income + factor(age_group) + factor(ethnicity), 
+                       design = nhanes_survey)
+summary(model_4)
+```
+
+```{r}
+model_5 <- svyglm(income ~ ethnicity, 
+                       design = nhanes_survey)
+summary(model_5)
+```
+
+```{r}
+
+```
+
+Questions:
+
+What exactly are the weighting and sampling of nhanes doing with the data?.
+
+What kind of model are we really applying, I would like to know more details on "svyglm"
+
+References:
+
+*U.S. Department of Health and Human Services, Centers for Disease Control and Prevention (CDC), National Center for Health Statistics. (2021). NHANES Analytic and Reporting Guidelines.* Retrieved from: <https://wwwn.cdc.gov/nchs/nhanes/analyticguidelines.aspx>
+
+World Health Organization. (2000). *Obesity: Preventing and Managing the Global Epidemic.* WHO Technical Report Series 894. <http://www.who.int/nutrition/publications/obesity/WHO_TRS_894/en/>
