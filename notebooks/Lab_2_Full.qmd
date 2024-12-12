@@ -1,0 +1,40 @@
+---
+title: "BMI relationship to household income in the U.S. using the National Health and Nutrition Examination Survey (NHANES), collected between August 2021 and August 2023"
+author: "Team2"
+format: pdf
+---
+
+**INTRODUCTION**
+
+This study examines the relationship between income and Body Mass Index (BMI) to explore the "Great American Paradox," a phenomenon where economic prosperity coexists with high rates of obesity and related health disparities. Despite rising income levels in parts of the population, obesity remains a pervasive issue, disproportionately affecting lower-income groups. This paradox raises critical questions about the social determinants of health and the interplay between economic and behavioral factors.
+
+By analyzing this relationship, we aim to provide insights into how socioeconomic conditions shape health outcomes, offering evidence to inform public health strategies. This research contributes to understanding a key aspect of American health disparities and supports the development of interventions targeting vulnerable populations.
+
+**DESCRIPTION OF THE DATA SOURCE**
+
+To analyze the relationship between income and BMI, we utilize data from the National Health and Nutrition Examination Survey (NHANES), collected between August 2021 and August 2023. NHANES is a cornerstone of public health research in the United States, known for its rigorous methodology combining interviews and standardized physical examinations conducted by trained professionals. This ensures reliable, directly measured health data, particularly critical for BMI analysis.
+
+**DATA WRANGLING**
+
+**OPERATIONALIZATION**
+
+**DATA VISUALIZATION**
+
+**MODEL SPECIFICATION**
+
+**MODEL ASSUMPTIONS**
+
+**MODEL RESULTS AND INTERPRETATION**
+
+**APPENDIX**
+
+**APPENDIX A - STATISTICAL MODEL COMPARISON**
+
+```{r}
+
+```
+
+```{r}
+#| echo: false
+
+```
