@@ -44,7 +44,7 @@ head(df)
 ## Select wanted columns 
 
 ```{r}
-df_clean = df %>%
+df = df %>%
   # Select wanted columns
   select(SDMVSTRA, SDMVPSU, WTMEC2YR, BMXBMI, INDFMPIR, RIDAGEYR, RIAGENDR, RIDRETH3) %>%
   # Make names more readable
@@ -74,37 +74,53 @@ df_clean = df %>%
     )
   )
 
-dim(df_clean)
-head(df_clean)
+dim(df)
+head(df)
 ```
 
 # Operationalization
 
 ```{r}
 # Count NA's in each column
-df_clean %>%
+df %>%
   summarize(across(everything(), ~ .x %>% is.na() %>% sum()))
 ```
 
 ```{r}
 # Count rows with any NA's
-df_clean %>%
+df %>%
   filter(if_any(everything(), ~ is.na(.x))) %>%
   count()
 ```
 
 ```{r}
 # Remove rows with any NA's
-df_final = df_clean %>%
+df = df %>%
   drop_na()
 
-dim(df_final)
-head(df_final)
+dim(df)
+head(df)
+```
+
+```{r}
+# Count rows where age is less than 20
+df %>%
+  filter(age < 20) %>%
+  count()
+```
+
+```{r}
+# Drop rows where age is less than 20
+df = df %>%
+  filter(age >= 20)
+
+dim(df)
+head(df)
 ```
 
 # Export Results
 
 ```{r}
-write_csv(df_final, here("data", "interim", "part2.csv"))
+write_csv(df, here("data", "interim", "part2.csv"))
 ```
 
