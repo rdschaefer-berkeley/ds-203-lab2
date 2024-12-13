@@ -1,0 +1,367 @@
+---
+title:  "Lab 2: Great American Paradox"
+subtitle: "BMI relationship to household income in the U.S. using the National Health and Nutrition Examination Survey (NHANES), collected between August 2021 and August 2023"
+date: today
+author: "Datasci 203 Team 2 - G. Frimpong, K. Coppa, R. Schaefer, C. Schrupp"
+
+abstract: This study investigates the relationship between income and Body Mass Index (BMI) to explore the "Great American Paradox," where economic prosperity coexists with high rates of obesity and health disparities. Using data from the National Health and Nutrition Examination Survey (NHANES) collected between 2021 and 2023, we analyze a nationally representative sample of 5,194 individuals. The dataset includes directly measured BMI and socioeconomic variables, ensuring robust and reliable analysis. Regression models evaluate how income-to-poverty ratios influence BMI while accounting for demographic factors such as age, gender, and race/ethnicity. Results highlight disparities in health outcomes across income levels, providing insights into the socioeconomic determinants of obesity. This research informs public health strategies aimed at reducing obesity-related disparities in the United States.
+toc: false 
+colorlinks: true
+cap-locaiton: bottom
+execute: 
+  echo: false 
+  warning: false 
+  message: false 
+bibliography: references.bib
+citeproc: true
+biblio-title: References
+link-citations: true
+format: 
+  pdf: 
+    documentclass: scrreprt
+---
+
+```{r}
+### Load libraries
+library(haven)
+library(here)
+library(lmtest)
+library(sandwich)
+library(tidyverse)
+library(survey)
+library(car)
+library(ggplot2)
+library(stargazer)
+library(gridExtra)
+library(viridis)
+```
+
+```{r}
+### Set theme
+theme_set(theme_minimal())
+```
+
+**INTRODUCTION**
+
+Obesity is often viewed as a consequence of individual lifestyle choices, yet in the United States, it starkly reveals systemic inequalities—a phenomenon known as the "Great American Paradox." This paradox, where economic prosperity coexists with high rates of obesity and related health disparities, challenges assumptions about wealth as a protective factor for health.
+Surprisingly, obesity disproportionately affects lower-income groups, raising critical questions about how socioeconomic conditions interact with health behaviors and outcomes.
+
+This study examines the relationship between income and Body Mass Index (BMI) to uncover the socioeconomic mechanisms underpinning this paradox.
+By leveraging robust, nationally representative data, we aim to identify patterns and disparities that contribute to obesity's persistence despite economic growth.
+The results will illuminate the broader social determinants of health, offering evidence to shape targeted public health interventions.
+In doing so, this research seeks to provide actionable insights into addressing one of America’s most pressing public health challenges.
+
+**DESCRIPTION OF THE DATA SOURCE**
+
+To analyze the relationship between income and BMI, we utilize data from the National Health and Nutrition Examination Survey (NHANES) @CDC2021 , collected between August 2021 and August 2023.
+NHANES is a cornerstone of public health research in the United States, known for its rigorous methodology combining interviews and standardized physical examinations conducted by trained professionals.
+This ensures reliable, directly measured health data, particularly critical for BMI analysis.
+
+```{r}
+### Load data
+
+# Demographics File (DEMO_L)
+nhanes_demo = read_xpt(url("https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2021/DataFiles/DEMO_L.xpt"))
+
+# Body Measurements File (BMX_L)
+nhanes_bm = read_xpt(url("https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2021/DataFiles/BMX_L.xpt"))
+```
+
+**DATA WRANGLING**
+
+Before we modified the data, the demographics file included 11,933 observations and 27 variables and the body measurements files included 8,860 observations and 22 variables.
+Both of these datasets include a unique ID that we used to join them.
+The joined dataset had 8,860 observations and 48 variables.
+We then made two modifications to the joined dataset to prepare it for analysis.
+The first was renaming the relevant columns to be more human readable.
+The second modification was updating the values in the categorical features.
+NHANES encodes all categorical variables with numeric indicators, so we replaced them with descriptive labels to make the data more human readable and to ensure the regression model treats these features as categorical variables.
+For the ethnicity variable, the reference was set to "White" to ensure stability in the regression model as it is the largest group.
+
+```{r}
+### Data Wrangling 
+
+# Join datasets on unique ID
+nhanes_df = nhanes_demo %>%
+  inner_join(nhanes_bm, by = "SEQN") 
+
+nhanes_df = nhanes_df %>%
+  # Select wanted columns
+  select(SDMVSTRA, SDMVPSU, WTMEC2YR, BMXBMI, INDFMPIR, RIDAGEYR, RIAGENDR, RIDRETH3) %>%
+  # Make names more readable
+  rename(
+    stratum = SDMVSTRA,
+    psu = SDMVPSU,
+    weight = WTMEC2YR,
+    bmi = BMXBMI,
+    income = INDFMPIR,
+    age = RIDAGEYR,
+    gender = RIAGENDR,
+    ethnicity = RIDRETH3
+  ) %>%
+  # Add labels to categorical levels
+  mutate(
+    gender = case_when(
+      gender == 1 ~ "Male",
+      gender == 2 ~ "Female"
+    ),
+    ethnicity = case_when(
+      ethnicity == 1 ~ "Mexican",
+      ethnicity == 2 ~ "Other Hispanic",
+      ethnicity == 3 ~ "White",
+      ethnicity == 4 ~ "Black",
+      ethnicity == 6 ~ "Asian",
+      ethnicity == 7 ~ "Other Race"
+    )
+  )
+
+# Set reference ethnicity to "White"
+nhanes_df$ethnicity <- factor(nhanes_df$ethnicity, 
+                          levels = c("Asian", 
+                                     "White", 
+                                     "Black", 
+                                     "Mexican", 
+                                     "Other Hispanic",
+                                     "Other Race"))
+nhanes_df$ethnicity <- relevel(nhanes_df$ethnicity, ref = "White")
+```
+
+**OPERATIONALIZATION**
+
+Out of the 48 variables in the joined dataset, we kept 8 of them for our analysis.
+Three of them are used to ensure our data matches the complex stratification used by NHANES to be representative of the American population.
+Our dependent variable is BMI and our main independent variable is income, represented as a ratio of a person’s income over the poverty line.
+We also kept the age, gender, and ethnicity variables as we hypothesized these demographic factors may also be significant predictors of BMI.
+Out of the 8,860 observations in the joined dataset, 1,480 are missing data in at least one of the kept variables.
+We dropped these observations to ensure we could conduct our full analysis with all of the remaining data.
+We also dropped 2,186 observations where the subject’s age is less than 20 years old.
+It is recommended to avoid using BMI for people under 20, so we removed these observations to get more reliable results on the remaining data @Johnson2013.
+An income categorical variable is created to facilitate the examination of the nonlinear relationship between income and BMI, with a cutoff of 1.3 chosen to distinguish low-income groups at or near the poverty threshold, as defined by the income-to-poverty ratio @Drewnowski2009.
+We created a binary obesity indicator variable (BMI \>= 30) to aid with visualizations @WHO2000. After selecting variables and dropping observations, our final dataset for analysis contained 5,194 observations and 10 variables.
+
+```{r}
+### Operationalization
+
+# Remove rows with any NA's
+nhanes_df = nhanes_df %>%
+  drop_na()
+
+# Drop rows where age is less than 20
+nhanes_df = nhanes_df %>%
+  filter(age >= 20)
+
+# Create income categorical variable
+nhanes_df$income_category <- cut(nhanes_df$income,
+                             breaks = c(-Inf, 1.3, Inf),
+                             labels = c("Low", "High"),
+                             right = FALSE)
+
+# Create obesity flag based on bmi
+nhanes_df$obese_flag <- ifelse(nhanes_df$bmi >= 30, 1, 0)
+nhanes_df$obese_flag = as.factor(nhanes_df$obese_flag)
+
+# Create NHANES survey stratification and weights model
+nhanes_survey <- svydesign(
+  id = ~psu,
+  strata = ~stratum,
+  weights = ~weight,
+  data = nhanes_df,
+  nest = TRUE
+)
+```
+
+**DATA VISUALIZATION**
+
+```{r}
+# Obesity Rates by Income/Ethnicity sub-groups
+inc.eth.out = nhanes_df %>%
+  group_by(ethnicity, income_category) %>%
+  summarise(n=n(),
+            perc_obs = round(sum(obese_flag==1)/n*100,1))
+
+inc.eth.plot = ggplot(inc.eth.out, aes(x = income_category, y = reorder(ethnicity,n), fill = perc_obs)) +
+  geom_tile(width=0.95, height=0.95) +
+  scale_fill_viridis(
+    option = "plasma",  # "magma", "plasma", "inferno", "viridis"
+    direction = -1
+  ) +
+  labs(x = "\nIncome Group", 
+       y = "Ethnicity\n", 
+       fill = "Obesity %", 
+       title = "How Obesity Varies by Income Group and Ethnicity"
+       ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.text = element_text(size=14),
+        text = element_text(size=16))
+```
+
+```{r}
+#|fig-cap="How Obesity Varies by Income Group and Ethnicity"
+inc.eth.plot
+```
+
+**Figure 1:** This heatmap shows how obesity prevalence varies by income and ethnicity.
+Asians are outliers with an extremely low prevalence of obesity (low-6.7%, high-11.7%) compared to the other ethnic groups.
+Black, Mexican, and Other Hispanic ethnicities have a higher prevalence of obesity in the high-income group.
+
+**MODEL SPECIFICATION**
+
+The regression models in this study explore the relationship between income and BMI, progressively adding demographic and interaction terms.
+**Model 1** serves as the baseline, using income as a continuous predictor.
+**Model 1a** replaces income with income categories to examine potential nonlinear effects.
+**Model 2** adds gender and its interaction with income to assess gender-specific patterns.
+**Models 3** and **4** extend this by incorporating age and ethnicity, respectively, to explore additional moderating effects.
+Finally, **Model 5** includes a three-way interaction (income, gender, and ethnicity) but was excluded from analysis due to instability and lack of sufficient data in certain subgroups.
+
+```{r}
+### Model 1: Baseline model with income as a continuous predictor.
+model_1 <- svyglm(bmi ~ income  , design = nhanes_survey)
+```
+
+```{r}
+### Model 1a: Uses income categories instead of continuous income.
+model_1a <- svyglm(bmi ~ income_category  , design = nhanes_survey)
+```
+
+```{r}
+### Model 2: Adds gender and its interaction with income.
+model_2 <- svyglm(bmi~ income * gender , design = nhanes_survey)
+```
+
+```{r}
+### Model 3: Includes age as a predictor and its interaction with income.
+model_3 <- svyglm(bmi ~ income * age, design = nhanes_survey)
+```
+
+```{r}
+### Model 4: Adds ethnicity and its interaction with income.
+model_4 <- svyglm(bmi~ income * ethnicity , design = nhanes_survey)
+```
+
+```{r}
+### Model 5: Three-way interaction: Income, Gender, Ethnicity.
+#| warning: false
+model_5 <- svyglm(bmi ~ income * gender * ethnicity, design = nhanes_survey)
+```
+
+**MODEL ASSUMPTIONS**
+
+The model was applied with careful attention to key assumptions and the complex survey design.
+Linearity was assessed through residual diagnostics, revealing no major deviations from expected patterns.
+The complex survey design, including weights, strata, and primary sampling units (PSUs), was properly specified using `svyglm()`, which also provides robust standard errors by default, helping to address potential heteroscedasticity and ensure valid inference and independence of observations (IID).
+Collinearity was evaluated and identified as a potential concern for multi-variable models but is not anticipated to pose significant issues in the current specifications.
+Two primary limitations were considered: the censoring of income data at 5.0, which restricts differentiation at higher income levels, and the exclusion of BMI data for participants under 20 years old, which ensures adult-specific BMI interpretations but reduces generalizability.
+These measures ensure the model's robustness while acknowledging areas for improvement.
+
+**MODEL RESULTS AND INTERPRETATION**
+
+**Model 1 and 1a:**\
+Income alone shows a significant (negative) relationship with BMI (p=0.002).
+Using income categories, the “High” category is associated with a modest but statistically significant lower BMI than the baseline category (p=0.04).
+Results from these two models suggest that once focusing on adults, there is a subtle socioeconomic gradient.
+
+**Models 3-5:**\
+Income is negatively associated with BMI among females but less so (or even opposite in direction) for males.
+This indicates gendered patterns in how socioeconomic status translates into BMI outcomes.
+Including age did not significantly alter the relationship between income and BMI or reveal interaction effects.
+Age might already be indirectly accounted for via the adult-only sample, and no strong differential effects were detected in this linear form (p=0.5).
+Ethnicity affects baseline BMI levels, with Asian participants exhibiting notably lower BMIs at the reference income level (as shown in Figure 1).
+Yet, the income-BMI slope does not significantly differ across most ethnic groups, suggesting that while baseline risk may differ by ethnicity, socioeconomic gradients are less distinct.
+Attempting to model three-way interactions leads to a lack of degrees of freedom, rendering p-values undefined and estimates unreliable.
+This complexity suggests the need for a more parsimonious approach or a larger sample.
+
+**Conclusion**\
+Model 1 reveals a statistically significant if modest socioeconomic gradient.
+Gender differences are evident, while age and ethnicity primarily influence baseline BMI rather than modifying the income relationship.
+Overly complex models with multiple interactions (gender, ethnicity, income) exceed the data’s capacity, leading to unstable results.
+A few limitations exist for this study.
+BMI alone does not perfectly capture body composition differences.
+These findings emphasize the importance of judicious model selection, and acknowledging the limitations of BMI as a measure and top-coded income, especially for subpopulations.
+Further research may refine these methods, incorporate additional variables, or explore non-linear models to better understand the nuanced relationship between income and obesity risk.
+
+**APPENDIX A - DATA SOURCE**
+
+1.  Demographics File (DEMO_L): Provides our key independent variable: ratio of family income to poverty (INDFMPIR), Includes essential demographic controls: age, gender, race/ethnicity, Contains necessary survey design variables (weights, strata, PSUs) for proper statistical inference, Offers contextual socioeconomic information crucial for understanding income patterns.
+
+    Link: <https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2021/DataFiles/DEMO_L.xpt>
+
+2.  Body Measurements File (BMX_L): Contains our dependent variable: Body Mass Index (BMI), Includes height and weight measurements taken by trained health technicians, Ensures standardized measurement protocols across all participants, Provides the physical data necessary to explore our central research question.
+
+    Link: <https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2021/DataFiles/BMX_L.xpt>
+
+**APPENDIX B - STATISTICAL MODEL COMPARISON**
+
+```{r}
+#| warning: false
+# Create stargazer table with the 4 calculated models
+stargazer(model_1, model_1a, model_2, model_3, model_4,
+          type = "text",   # Options: "text", "html", or "latex"
+          title = "Comparison of Models",
+          dep.var.labels = c("BMI"),
+          column.labels = c("Model 1", 
+                            "Model 1a", 
+                            "Model 2", 
+                            "Model 3",
+                            "Model 4"),
+          covariate.labels = c("Income", 
+                               "Income Category: High", 
+                               "Gender: Male", 
+                               "Age", 
+                               "Ethnicity: Asian", 
+                               "Income x Gender", 
+                               "Income x Age", 
+                               "Income x Ethnicity"),
+          no.space = TRUE, # to remove the spaces after each line of coefficients
+          column.sep.width = "3pt", # to reduce column width
+          #single.row = TRUE,
+          font.size = "small",
+          keep.stat = c("ser", "f"),
+          omit.stat = c("ll", "aic"),  # Removes Log Likelihood and Akaike stats
+          digits = 2)
+
+```
+
+**Table 1:** The stargazer table compares five models exploring the relationship between income and BMI, progressively incorporating additional variables and interactions.
+Model 5 is not included.
+
+```{r}
+
+```
+
+**APPENDIX C - RESIDUALS VS FITTED VALUES PLOT**
+
+```{r}
+### Residuals vs fitted values of model 1
+fit_vals = fitted(model_1)
+resid_vals = residuals(model_1)
+
+residuals_df = data.frame(
+  Fitted = fit_vals,
+  Residuals = resid_vals
+)
+
+residuals.plot <- ggplot(residuals_df, aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.7, color = "#0f39ab") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Residuals vs Fitted Values - Model 1",
+    x = "\nFitted Values",
+    y = "Residuals\n"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 10),
+    plot.title = element_text(size = 12, hjust = 0.5)
+  )
+residuals.plot
+```
+
+**Figure 2:** The Residuals vs. Fitted values plot for Model 1 shows residuals scattered around the zero line, with minor heteroscedasticity at higher fitted values.
+The censoring cap at 5 for the income variable likely contributes to this variability, suggesting room for model improvement.
+
+**REFERENCES**
+
+::: {#refs}
+:::
